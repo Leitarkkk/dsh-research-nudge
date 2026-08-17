@@ -1,0 +1,39 @@
+name: Feature request
+description: Suggest a focused improvement to the research-debt policy or integration.
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What agent behavior or research-debt failure mode should improve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Explain the signal, scoring, reminder, or integration change.
+    validations:
+      required: true
+  - type: textarea
+    id: examples
+    attributes:
+      label: Example sequence
+      description: Show a concrete tool-call sequence and the expected outcome.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: guardrails
+    attributes:
+      label: Guardrails
+      options:
+        - label: The proposal remains advisory and does not force browsing or block tools.
+          required: true
+        - label: The proposal does not require telemetry or an extra model call.
+          required: true

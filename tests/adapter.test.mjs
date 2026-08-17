@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { Context } from '@deepseek-ai/cordis'
 
 // Adapter tests simulate the `tools/post-execute` waterfall surface exactly as
 // the DSH tool pipeline drives it (see dsh-tools postExecute). Tests import
@@ -18,8 +19,24 @@ function plugin(listeners) {
 
 /** Drive one finished tool execution through the waterfall. */
 async function runTool(listener, agent, name, result, { downstream = { kind: 'accept' } } = {}) {
-  const exec = { name, arguments: {}, agent }
+  const exec = execution(agent, name)
   return listener(exec, result, async () => downstream)
+}
+
+function execution(agent, name) {
+  return {
+    token: Symbol('tool'),
+    callId: 'call-1',
+    rootCallId: 'call-1',
+    name,
+    arguments: {},
+    agent,
+    signal: new AbortController().signal,
+  }
+}
+
+function succeeded(text = 'ok') {
+  return { isError: false, value: null, content: [{ type: 'text', text }] }
 }
 
 function nudgeOf(decision) {
@@ -27,7 +44,7 @@ function nudgeOf(decision) {
 }
 
 function failed(text) {
-  return { isError: true, error: { message: text }, content: [{ type: 'text', text }] }
+  return { isError: true, error: { message: text }, content: [{ type: 'text', text: `Error: ${text}` }] }
 }
 
 test('adapter registers a tools/post-execute listener', () => {
@@ -47,13 +64,13 @@ test('tool-call-count threshold queues a nudge on the exact crossing call', asyn
   apply(ctx, { maxToolCallsWithoutResearch: 5, debtThreshold: 999, maxMinutesWithoutResearch: 999 })
   const listener = plugin(listeners)
   const agent = {}
-  const exec = { name: 'read', arguments: {}, agent }
+  const exec = execution(agent, 'read')
 
   for (let i = 0; i < 4; i += 1) {
-    const decision = await listener(exec, {}, async () => ({ kind: 'accept' }))
+    const decision = await listener(exec, succeeded(), async () => ({ kind: 'accept' }))
     assert.equal(nudgeOf(decision), undefined, `call ${i + 1} must not nudge yet`)
   }
-  const decision = await listener(exec, {}, async () => ({ kind: 'accept' }))
+  const decision = await listener(exec, succeeded(), async () => ({ kind: 'accept' }))
   assert.ok(nudgeOf(decision), '5th call must nudge')
   assert.equal(nudgeOf(decision).source.plugin, pluginName)
   assert.equal(nudgeOf(decision).role, 'user')
@@ -95,19 +112,19 @@ test('research tool resets the accumulation', async () => {
   apply(ctx, { maxToolCallsWithoutResearch: 5, debtThreshold: 999, maxMinutesWithoutResearch: 999 })
   const listener = plugin(listeners)
   const agent = {}
-  const exec = { name: 'read', arguments: {}, agent }
+  const exec = execution(agent, 'read')
   for (let i = 0; i < 4; i += 1) {
-    const decision = await listener(exec, {}, async () => ({ kind: 'accept' }))
+    const decision = await listener(exec, succeeded(), async () => ({ kind: 'accept' }))
     assert.equal(nudgeOf(decision), undefined)
   }
-  const crossed = await listener(exec, {}, async () => ({ kind: 'accept' }))
+  const crossed = await listener(exec, succeeded(), async () => ({ kind: 'accept' }))
   assert.ok(nudgeOf(crossed), '5th call must nudge')
   assert.match(nudgeOf(crossed).content[0].text, /tool_calls_since_research=5/)
 
   const researchAgent = {}
-  await listener({ name: 'web_search', arguments: {}, agent: researchAgent }, {}, async () => ({ kind: 'accept' }))
+  await listener(execution(researchAgent, 'web_search'), succeeded(), async () => ({ kind: 'accept' }))
   for (let i = 0; i < 3; i += 1) {
-    const decision = await listener({ name: 'read', arguments: {}, agent: researchAgent }, {}, async () => ({ kind: 'accept' }))
+    const decision = await listener(execution(researchAgent, 'read'), succeeded(), async () => ({ kind: 'accept' }))
     assert.equal(nudgeOf(decision), undefined, 'research reset must clear accumulated debt')
   }
 })
@@ -117,12 +134,12 @@ test('cooldown suppresses further nudges until it elapses', async () => {
   apply(ctx, { maxToolCallsWithoutResearch: 3, debtThreshold: 999, maxMinutesWithoutResearch: 999, cooldownMinutes: 10 })
   const listener = plugin(listeners)
   const agent = {}
-  const exec = { name: 'read', arguments: {}, agent }
-  await listener(exec, {}, async () => ({ kind: 'accept' }))
-  await listener(exec, {}, async () => ({ kind: 'accept' }))
-  const first = await listener(exec, {}, async () => ({ kind: 'accept' }))
+  const exec = execution(agent, 'read')
+  await listener(exec, succeeded(), async () => ({ kind: 'accept' }))
+  await listener(exec, succeeded(), async () => ({ kind: 'accept' }))
+  const first = await listener(exec, succeeded(), async () => ({ kind: 'accept' }))
   assert.ok(nudgeOf(first), 'first crossing nudges')
-  const after = await listener(exec, {}, async () => ({ kind: 'accept' }))
+  const after = await listener(exec, succeeded(), async () => ({ kind: 'accept' }))
   assert.equal(nudgeOf(after), undefined, 'cooldown must suppress the next nudge')
 })
 
@@ -132,7 +149,7 @@ test('nudge prepends while preserving a blocked downstream decision', async () =
   const listener = plugin(listeners)
   const agent = {}
   const downstream = { kind: 'block', feedback: [{ type: 'text', text: 'blocked by policy' }], additionalContexts: [{ id: 'other' }] }
-  const decision = await runTool(listener, agent, 'read', {}, { downstream })
+  const decision = await runTool(listener, agent, 'read', succeeded(), { downstream })
   assert.equal(decision.kind, 'block')
   assert.deepEqual(decision.feedback, downstream.feedback)
   assert.equal(decision.additionalContexts[0].source.plugin, pluginName, 'nudge must be first')
@@ -145,14 +162,14 @@ test('policy state is isolated per agent', async () => {
   const listener = plugin(listeners)
   const busy = {}
   const idle = {}
-  const exec = { name: 'read', arguments: {}, agent: busy }
+  const exec = execution(busy, 'read')
   for (let i = 0; i < 2; i += 1) {
-    const decision = await listener(exec, {}, async () => ({ kind: 'accept' }))
+    const decision = await listener(exec, succeeded(), async () => ({ kind: 'accept' }))
     assert.equal(nudgeOf(decision), undefined)
   }
-  const busyNudge = await listener(exec, {}, async () => ({ kind: 'accept' }))
+  const busyNudge = await listener(exec, succeeded(), async () => ({ kind: 'accept' }))
   assert.ok(nudgeOf(busyNudge), '3rd call on the busy agent must nudge')
-  const idleDecision = await listener({ name: 'read', arguments: {}, agent: idle }, {}, async () => ({ kind: 'accept' }))
+  const idleDecision = await listener(execution(idle, 'read'), succeeded(), async () => ({ kind: 'accept' }))
   assert.equal(nudgeOf(idleDecision), undefined, 'idle agent must not inherit the busy agent\'s debt')
 })
 
@@ -164,13 +181,38 @@ test('unexpected shapes are tolerated without throwing or nudging', async () => 
   apply(ctx, { maxToolCallsWithoutResearch: 999, debtThreshold: 999, maxMinutesWithoutResearch: 999 })
   const listener = plugin(listeners)
   const weird = [
-    [{}, {}, async () => ({ kind: 'accept' })],
-    [null, {}, async () => ({ kind: 'accept' })],
+    [{}, succeeded(), async () => ({ kind: 'accept' })],
+    [null, succeeded(), async () => ({ kind: 'accept' })],
     [{ name: 'read', arguments: {}, agent: null }, undefined, async () => ({ kind: 'accept' })],
     [{ name: 'read', arguments: {}, agent: {} }, undefined, async () => ({ kind: 'accept' })],
   ]
-  for (const [exec, result, next] of weird) {
-    const decision = await listener(exec, result, next)
-    assert.equal(nudgeOf(decision), undefined)
+  const logged = []
+  const originalError = console.error
+  console.error = (...args) => { logged.push(args) }
+  try {
+    for (const [exec, result, next] of weird) {
+      const decision = await listener(exec, result, next)
+      assert.equal(nudgeOf(decision), undefined)
+    }
+  } finally {
+    console.error = originalError
   }
+  assert.equal(logged.length, 3, 'malformed lifecycle inputs are contained and diagnosed')
+})
+
+test('adapter composes through a real Cordis waterfall', async () => {
+  const ctx = new Context()
+  apply(ctx, { maxToolCallsWithoutResearch: 1, debtThreshold: 999, maxMinutesWithoutResearch: 999 })
+  const decision = await ctx.waterfall(
+    ctx,
+    'tools/post-execute',
+    execution({}, 'read'),
+    succeeded(),
+    () => Promise.resolve({ kind: 'accept' }),
+  )
+  assert.equal(decision.kind, 'accept')
+  assert.equal(decision.additionalContexts.length, 1)
+  assert.equal(decision.additionalContexts[0].source.kind, 'plugin')
+  assert.equal(decision.additionalContexts[0].source.form, 'notice')
+  assert.equal(typeof decision.additionalContexts[0].id, 'string')
 })

@@ -18,7 +18,6 @@ export type PolicyConfig = {
   executionDebt: number
   failureDebt: number
   repeatedFailureDebt: number
-  researchCredit: number
 }
 
 export const defaultPolicy: PolicyConfig = {
@@ -31,7 +30,6 @@ export const defaultPolicy: PolicyConfig = {
   executionDebt: 1,
   failureDebt: 4,
   repeatedFailureDebt: 6,
-  researchCredit: 1000,
 }
 
 export function newState(now = Date.now()): ResearchState {
