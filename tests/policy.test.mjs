@@ -41,3 +41,13 @@ test('research resets debt', () => {
   assert.equal(s.callsSinceResearch, 0)
   assert.equal(s.lastResearchAt, 100)
 })
+
+test('elapsed-time threshold and cooldown use their configured boundaries', () => {
+  const cfg = { ...defaultPolicy, maxMinutesWithoutResearch: 1, cooldownMinutes: 10, debtThreshold: 999, maxToolCallsWithoutResearch: 999 }
+  const s = newState(0)
+  assert.equal(shouldNudge(s, cfg, 59_999), false)
+  assert.equal(shouldNudge(s, cfg, 60_000), true)
+  s.lastNudgeAt = 60_000
+  assert.equal(shouldNudge(s, cfg, 659_999), false)
+  assert.equal(shouldNudge(s, cfg, 660_000), true)
+})
