@@ -1,0 +1,47 @@
+{
+  "name": "dsh-research-nudge",
+  "version": "0.1.0",
+  "description": "Research-debt guard for DeepSeek Harness: nudges coding agents to search docs, GitHub and the web before repeated local trial-and-error.",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Leitarkkk/dsh-research-nudge.git"
+  },
+  "keywords": ["deepseek", "harness", "dsh", "dsh-plugin", "agent", "research", "web-search", "coding-agent"],
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.json",
+    "test": "node --test tests/*.test.mjs",
+    "check": "npm run typecheck && npm run build && npm test",
+    "prepare": "npm run build",
+    "prepack": "npm run check"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-tools": "^0.0.1-rc.1"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-tools": "^0.0.1-rc.1",
+    "@types/node": "^26.2.0",
+    "typescript": "^7.0.2"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": ["lib", "src", "cordis.patch.yml", "README.md", "README.zh-CN.md", "LICENSE"],
+  "publishConfig": {"registry": "https://registry.npmjs.org/"}
+}

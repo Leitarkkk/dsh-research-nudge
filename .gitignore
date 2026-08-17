@@ -1,0 +1,7 @@
+node_modules/
+lib/
+*.tgz
+.DS_Store
+
+# Author-only publishing runbook; deliberately not shipped to the repository.
+PUBLISHING.md

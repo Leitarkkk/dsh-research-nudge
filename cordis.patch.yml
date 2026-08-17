@@ -1,0 +1,15 @@
+# dsh-research-nudge bundle patch.
+#
+# DSH profile bundles apply their dsh.bundle.patch as a loader patch layer
+# over the profile entry list: a top-level YAML array of patch entries, where
+# `insert` appends plugin rows. This row mounts the plugin and its defaults;
+# edit the profile's own cordis.patch.yml or this file to tune the policy.
+- insert:
+    - id: research-nudge
+      name: dsh-research-nudge
+      config:
+        enabled: true
+        debtThreshold: 20
+        maxToolCallsWithoutResearch: 15
+        maxMinutesWithoutResearch: 15
+        cooldownMinutes: 10

@@ -1,0 +1,4 @@
+# Normalize line endings: LF on checkout everywhere, regardless of OS.
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
