@@ -38,13 +38,12 @@ const DEFAULT_RESEARCH_TOOLS = [
 
 const DEFAULT_REMINDER = `[Research Nudge]
 
-You have accumulated significant research debt through local tool use without consulting external information.
+Pause and reflect before continuing:
 
-Before continuing, consider whether external research could resolve the current uncertainty faster:
-- search official documentation for unfamiliar APIs;
-- search GitHub for existing implementations and issues;
-- check whether a mature library already solves the problem;
-- search exact error messages after repeated failures.
+1. What problem am I trying to solve right now? Restate it precisely.
+2. What approach am I currently taking, and how many attempts has it taken without success?
+3. Am I fully confident this approach will work? If I am guessing at an API, an error message, a library's behavior, or platform details I have not verified, I am not fully confident.
+4. If I am not fully confident: external research is cheaper than more local trial-and-error. Search the official documentation, GitHub issues, existing libraries, or the exact error message before trying again.
 
 Do not search merely to satisfy this reminder. If the task is self-contained and external research would not help, continue normally.`
 
