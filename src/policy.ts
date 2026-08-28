@@ -5,6 +5,7 @@ export type ResearchState = {
   repeatedFailures: number
   lastResearchAt: number
   lastNudgeAt: number
+  snoozedUntil: number
   lastFailureFingerprint?: string
 }
 
@@ -35,7 +36,7 @@ export const defaultPolicy: PolicyConfig = {
 export function newState(now = Date.now()): ResearchState {
   return {
     debt: 0, callsSinceResearch: 0, failuresSinceResearch: 0,
-    repeatedFailures: 0, lastResearchAt: now, lastNudgeAt: 0,
+    repeatedFailures: 0, lastResearchAt: now, lastNudgeAt: 0, snoozedUntil: 0,
   }
 }
 
@@ -76,6 +77,11 @@ export function recordResearch(s: ResearchState, now = Date.now()): void {
   s.lastFailureFingerprint = undefined
 }
 
+/** Suppress advisory nudges until the requested time without discarding debt. */
+export function snoozeResearchNudges(s: ResearchState, minutes: number, now = Date.now()): void {
+  s.snoozedUntil = now + Math.max(0, minutes) * 60_000
+}
+
 export function recordTool(
   s: ResearchState, cfg: PolicyConfig, name: string,
   ok: boolean, result?: unknown, now = Date.now(),
@@ -98,6 +104,7 @@ export function recordTool(
 }
 
 export function shouldNudge(s: ResearchState, cfg: PolicyConfig, now = Date.now()): boolean {
+  if (now < s.snoozedUntil) return false
   const cooldown = cfg.cooldownMinutes * 60_000
   if (s.lastNudgeAt && now - s.lastNudgeAt < cooldown) return false
   const staleMs = cfg.maxMinutesWithoutResearch * 60_000
