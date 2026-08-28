@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 // Tests import the built JS, so run `npm run build` before `npm test`.
 import {
   defaultPolicy, isResearchTool, newState, recordResearch,
-  recordTool, shouldNudge,
+  recordTool, shouldNudge, snoozeResearchNudges,
 } from '../lib/policy.js'
 
 test('research tool recognition is normalization tolerant', () => {
@@ -40,6 +40,17 @@ test('research resets debt', () => {
   assert.equal(s.debt, 0)
   assert.equal(s.callsSinceResearch, 0)
   assert.equal(s.lastResearchAt, 100)
+})
+
+test('snooze suppresses nudges without erasing debt and expires exactly on time', () => {
+  const cfg = { ...defaultPolicy, debtThreshold: 1, maxToolCallsWithoutResearch: 1, maxMinutesWithoutResearch: 999 }
+  const s = newState(0)
+  recordTool(s, cfg, 'read_file', true, null, 1)
+  assert.equal(shouldNudge(s, cfg, 1), true)
+  snoozeResearchNudges(s, 10, 1)
+  assert.ok(s.debt > 0, 'snooze must preserve accumulated debt')
+  assert.equal(shouldNudge(s, cfg, 600_000), false)
+  assert.equal(shouldNudge(s, cfg, 600_001), true)
 })
 
 test('elapsed-time threshold and cooldown use their configured boundaries', () => {
