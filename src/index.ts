@@ -164,11 +164,14 @@ export function apply(ctx: Context, config: Config = {}): void {
     if (exec.agent === undefined || exec.name === '') return undefined
     const state = stateFor(exec.agent)
 
-    if (normalizeToolName(exec.name) === SNOOZE_TOOL) {
+    if (normalizeToolName(exec.name) === SNOOZE_TOOL && !result.isError) {
       const minutes = requestedSnoozeMinutes(exec, maxAgentSnoozeMinutes)
       snoozeResearchNudges(state, minutes)
       if (config.debug) console.error(`[research-nudge] agent snoozed nudges for ${minutes}m`)
       return undefined
+    }
+    if (normalizeToolName(exec.name) === SNOOZE_TOOL && config.debug) {
+      console.error('[research-nudge] snooze call failed; counting it as an ordinary call')
     }
 
     if (isResearchTool(exec.name, researchTools)) {

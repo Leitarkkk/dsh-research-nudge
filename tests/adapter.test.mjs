@@ -151,6 +151,24 @@ test('agent snooze suppresses nudges for that agent without resetting debt', asy
   assert.ok(nudgeOf(other), 'snooze must be isolated to the requesting agent')
 })
 
+test('a failed snooze call arms no suppression and counts as an ordinary call', async () => {
+  const { ctx, listeners } = makeCtx()
+  apply(ctx, { maxToolCallsWithoutResearch: 2, debtThreshold: 999, maxMinutesWithoutResearch: 999, cooldownMinutes: 0 })
+  const listener = plugin(listeners)
+  const agent = {}
+  await runTool(listener, agent, 'read', succeeded())
+  const rejected = await runTool(
+    listener,
+    agent,
+    'research_nudge_snooze',
+    failed('"minutes" must be a number'),
+    { arguments: { minutes: 'abc' } },
+  )
+  assert.ok(nudgeOf(rejected), 'the failed snooze is ordinary call #2 and must cross the unsuppressed threshold')
+  const after = await runTool(listener, agent, 'read', succeeded())
+  assert.ok(nudgeOf(after), 'a failed snooze call must not arm suppression')
+})
+
 test('cooldown suppresses further nudges until it elapses', async () => {
   const { ctx, listeners } = makeCtx()
   apply(ctx, { maxToolCallsWithoutResearch: 3, debtThreshold: 999, maxMinutesWithoutResearch: 999, cooldownMinutes: 10 })
