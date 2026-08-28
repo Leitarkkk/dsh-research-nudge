@@ -2,24 +2,31 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
-import type {
-  PostToolDecision,
-  ToolExecution,
-  ToolExecutionResult,
+import {
+  defineTool,
+  type PostToolDecision,
+  type ToolExecution,
+  type ToolExecutionResult,
 } from '@deepseek-ai/dsh-tools'
 import z from '@deepseek-ai/schemastery'
 import {
   defaultPolicy,
   isResearchTool,
   newState,
+  normalizeToolName,
   recordResearch,
   recordTool,
   shouldNudge,
+  snoozeResearchNudges,
   type PolicyConfig,
   type ResearchState,
 } from './policy.js'
 
 export const name = 'research-nudge'
+export const inject = ['tools']
+
+const SNOOZE_TOOL = 'research_nudge_snooze'
+const DEFAULT_MAX_AGENT_SNOOZE_MINUTES = 60
 
 const DEFAULT_RESEARCH_TOOLS = [
   'web_search',
@@ -45,12 +52,13 @@ Pause and reflect before continuing:
 3. Am I fully confident this approach will work? If I am guessing at an API, an error message, a library's behavior, or platform details I have not verified, I am not fully confident.
 4. If I am not fully confident: external research is cheaper than more local trial-and-error. Search the official documentation, GitHub issues, existing libraries, or the exact error message before trying again.
 
-Do not search merely to satisfy this reminder. If the task is self-contained and external research would not help, continue normally.`
+Do not search merely to satisfy this reminder. If the task is self-contained and external research would not help, continue normally. If you are deliberately making progress from local evidence and do not want another reminder for a while, use the research_nudge_snooze tool.`
 
 export interface Config extends Partial<PolicyConfig> {
   enabled?: boolean
   researchTools?: string[]
   reminder?: string
+  maxAgentSnoozeMinutes?: number
   debug?: boolean
 }
 
@@ -68,6 +76,7 @@ export const Config: z<Config> = z.object({
   repeatedFailureDebt: z.number().step(1).min(0).default(defaultPolicy.repeatedFailureDebt),
   researchTools: z.array(z.string()).default(DEFAULT_RESEARCH_TOOLS),
   reminder: z.string().default(DEFAULT_REMINDER),
+  maxAgentSnoozeMinutes: z.number().step(1).min(1).default(DEFAULT_MAX_AGENT_SNOOZE_MINUTES),
   debug: z.boolean().default(false),
 })
 
@@ -109,12 +118,19 @@ function prependContext(ours: UserMessage, theirs: UserMessage[] | undefined): U
   return [ours, ...theirs ?? []]
 }
 
+function requestedSnoozeMinutes(exec: ToolExecution, maxMinutes: number): number {
+  const raw = Number((exec.arguments as { minutes?: unknown } | undefined)?.minutes)
+  if (!Number.isFinite(raw)) return Math.min(30, maxMinutes)
+  return Math.max(1, Math.min(Math.floor(raw), maxMinutes))
+}
+
 export function apply(ctx: Context, config: Config = {}): void {
   if (config.enabled === false) return
 
   const policy = policyConfig(config)
   const researchTools = config.researchTools ?? DEFAULT_RESEARCH_TOOLS
   const reminder = config.reminder ?? DEFAULT_REMINDER
+  const maxAgentSnoozeMinutes = config.maxAgentSnoozeMinutes ?? DEFAULT_MAX_AGENT_SNOOZE_MINUTES
   const states = new WeakMap<NonNullable<ToolExecution['agent']>, ResearchState>()
 
   function stateFor(agent: NonNullable<ToolExecution['agent']>): ResearchState {
@@ -126,9 +142,34 @@ export function apply(ctx: Context, config: Config = {}): void {
     return state
   }
 
+  ctx.tools.register(defineTool({
+    name: SNOOZE_TOOL,
+    description: 'Temporarily suppress Research Nudge reminders when local investigation is making useful progress. This does not erase accumulated research debt.',
+    parameters: {
+      minutes: { type: 'number', required: false, description: `Minutes to snooze (default 30, capped at ${maxAgentSnoozeMinutes}).` },
+      reason: { type: 'string', required: false, description: 'Brief reason for snoozing, for the agent transcript only.' },
+    },
+    output: {
+      schema: { type: 'string' },
+      render: (_args, value) => [{ type: 'text', text: value }],
+    },
+    async execute(args) {
+      const raw = Number(args.minutes ?? 30)
+      const minutes = Number.isFinite(raw) ? Math.max(1, Math.min(Math.floor(raw), maxAgentSnoozeMinutes)) : Math.min(30, maxAgentSnoozeMinutes)
+      return `Research Nudge reminders snoozed for ${minutes} minute${minutes === 1 ? '' : 's'}. Accumulated debt will continue to be tracked.`
+    },
+  }))
+
   function observe(exec: ToolExecution, result: Readonly<ToolExecutionResult>): UserMessage | undefined {
     if (exec.agent === undefined || exec.name === '') return undefined
     const state = stateFor(exec.agent)
+
+    if (normalizeToolName(exec.name) === SNOOZE_TOOL) {
+      const minutes = requestedSnoozeMinutes(exec, maxAgentSnoozeMinutes)
+      snoozeResearchNudges(state, minutes)
+      if (config.debug) console.error(`[research-nudge] agent snoozed nudges for ${minutes}m`)
+      return undefined
+    }
 
     if (isResearchTool(exec.name, researchTools)) {
       recordResearch(state)
