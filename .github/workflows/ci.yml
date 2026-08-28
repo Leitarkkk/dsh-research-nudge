@@ -25,3 +25,46 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm pack --dry-run
+
+  dsh-smoke:
+    name: Real DSH smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Install plugin into real DSH and boot runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          export HOME="$RUNNER_TEMP/dsh-home"
+          mkdir -p "$HOME"
+          DSH="npx -y @deepseek-ai/dsh@0.1.0-rc.7"
+
+          $DSH plugin --profile web add "$GITHUB_WORKSPACE"
+          $DSH --profile web --dump-config | tee "$RUNNER_TEMP/dsh-config.txt"
+          grep -q "research-nudge" "$RUNNER_TEMP/dsh-config.txt"
+
+          $DSH --profile web web --no-open >"$RUNNER_TEMP/dsh-web.log" 2>&1 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true' EXIT
+
+          ready=0
+          for _ in $(seq 1 30); do
+            if ! kill -0 "$pid" 2>/dev/null; then
+              cat "$RUNNER_TEMP/dsh-web.log"
+              exit 1
+            fi
+            if curl -fsS http://127.0.0.1:3080/ >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+
+          cat "$RUNNER_TEMP/dsh-web.log"
+          test "$ready" -eq 1
