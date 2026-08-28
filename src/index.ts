@@ -146,8 +146,8 @@ export function apply(ctx: Context, config: Config = {}): void {
     name: SNOOZE_TOOL,
     description: 'Temporarily suppress Research Nudge reminders when local investigation is making useful progress. This does not erase accumulated research debt.',
     parameters: {
-      minutes: { type: 'number', required: false, description: `Minutes to snooze (default 30, capped at ${maxAgentSnoozeMinutes}).` },
-      reason: { type: 'string', required: false, description: 'Brief reason for snoozing, for the agent transcript only.' },
+      minutes: { type: 'number', description: `Minutes to snooze (default 30, capped at ${maxAgentSnoozeMinutes}).` },
+      reason: { type: 'string', description: 'Brief reason for snoozing, for the agent transcript only.' },
     },
     output: {
       schema: { type: 'string' },
