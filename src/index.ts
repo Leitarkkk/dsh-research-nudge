@@ -164,17 +164,20 @@ export function apply(ctx: Context, config: Config = {}): void {
     if (exec.agent === undefined || exec.name === '') return undefined
     const state = stateFor(exec.agent)
 
-    if (normalizeToolName(exec.name) === SNOOZE_TOOL && !result.isError) {
-      const minutes = requestedSnoozeMinutes(exec, maxAgentSnoozeMinutes)
-      snoozeResearchNudges(state, minutes)
-      if (config.debug) console.error(`[research-nudge] agent snoozed nudges for ${minutes}m`)
-      return undefined
-    }
-    if (normalizeToolName(exec.name) === SNOOZE_TOOL && config.debug) {
-      console.error('[research-nudge] snooze call failed; counting it as an ordinary call')
-    }
-
-    if (isResearchTool(exec.name, researchTools)) {
+    // Snooze calls bypass research recognition entirely: a failed snooze
+    // (e.g. INVALID_ARGS from schema validation) must fall into ordinary
+    // failure accounting, never into recordResearch — a custom pattern like
+    // 'search' would otherwise substring-match 'research_nudge_snooze' and
+    // wipe accumulated debt on the very call that failed.
+    if (normalizeToolName(exec.name) === SNOOZE_TOOL) {
+      if (!result.isError) {
+        const minutes = requestedSnoozeMinutes(exec, maxAgentSnoozeMinutes)
+        snoozeResearchNudges(state, minutes)
+        if (config.debug) console.error(`[research-nudge] agent snoozed nudges for ${minutes}m`)
+        return undefined
+      }
+      if (config.debug) console.error('[research-nudge] snooze call failed; recording it as an ordinary failure')
+    } else if (isResearchTool(exec.name, researchTools)) {
       recordResearch(state)
       if (config.debug) console.error(`[research-nudge] research reset by ${exec.name}`)
       return undefined

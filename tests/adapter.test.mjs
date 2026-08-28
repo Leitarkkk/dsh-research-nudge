@@ -169,6 +169,63 @@ test('a failed snooze call arms no suppression and counts as an ordinary call', 
   assert.ok(nudgeOf(after), 'a failed snooze call must not arm suppression')
 })
 
+test('a failed snooze bypasses research recognition under substring patterns', async () => {
+  // researchTools: ['search'] substring-matches 'research_nudge_snooze'.
+  // A failed snooze must NOT enter recordResearch (which would wipe debt);
+  // it must fall into ordinary failure accounting instead.
+  const { ctx, listeners } = makeCtx()
+  apply(ctx, {
+    researchTools: ['search'],
+    debtThreshold: 9, maxToolCallsWithoutResearch: 999, maxMinutesWithoutResearch: 999, cooldownMinutes: 0,
+  })
+  const listener = plugin(listeners)
+  const agent = {}
+  // One ordinary failure: ordinary 1 + failure 4 = 5 debt, below threshold.
+  await runTool(listener, agent, 'read', failed('boom'))
+  const rejected = await runTool(
+    listener,
+    agent,
+    'research_nudge_snooze',
+    failed('"minutes" must be a number'),
+    { arguments: { minutes: 'abc' } },
+  )
+  assert.ok(nudgeOf(rejected), 'failed snooze must count as an ordinary failure (5 + 1 + 4 >= 9), not clear debt')
+  const after = await runTool(listener, agent, 'read', failed('boom again'))
+  assert.ok(nudgeOf(after), 'accumulated debt must survive the failed snooze')
+})
+
+test('a successful snooze neither resets nor suppresses accounting under substring patterns', async () => {
+  const { ctx, listeners } = makeCtx()
+  apply(ctx, {
+    researchTools: ['search'],
+    debtThreshold: 999, maxToolCallsWithoutResearch: 2, maxMinutesWithoutResearch: 999, cooldownMinutes: 0,
+  })
+  const listener = plugin(listeners)
+  const agent = {}
+  await runTool(listener, agent, 'read', succeeded())
+  const snoozed = await runTool(listener, agent, 'research_nudge_snooze', succeeded(), { arguments: { minutes: 30 } })
+  assert.equal(nudgeOf(snoozed), undefined, 'successful snooze must not be treated as research accounting either')
+  const suppressed = await runTool(listener, agent, 'read', succeeded())
+  assert.equal(nudgeOf(suppressed), undefined, 'successful snooze must still arm suppression despite the matching pattern')
+})
+
+test('failed research-named tools keep their pre-existing reset semantics', async () => {
+  // A failed call to a tool that genuinely matches the research pattern still
+  // records research (unchanged behavior of the else-if branch).
+  const { ctx, listeners } = makeCtx()
+  apply(ctx, {
+    researchTools: ['search'],
+    debtThreshold: 2, maxToolCallsWithoutResearch: 999, maxMinutesWithoutResearch: 999, cooldownMinutes: 0,
+  })
+  const listener = plugin(listeners)
+  const agent = {}
+  await runTool(listener, agent, 'read', failed('boom')) // debt 5 -> nudge (threshold 2)
+  const failedSearch = await runTool(listener, agent, 'web_search', failed('network down'))
+  assert.equal(nudgeOf(failedSearch), undefined, 'failed research call still resets via recordResearch (existing semantics)')
+  const next = await runTool(listener, agent, 'read', succeeded()) // fresh debt 1 < 2
+  assert.equal(nudgeOf(next), undefined, 'reset must have cleared prior debt')
+})
+
 test('cooldown suppresses further nudges until it elapses', async () => {
   const { ctx, listeners } = makeCtx()
   apply(ctx, { maxToolCallsWithoutResearch: 3, debtThreshold: 999, maxMinutesWithoutResearch: 999, cooldownMinutes: 10 })
