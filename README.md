@@ -38,15 +38,14 @@ The default threshold is 20, so the last result carries an additional model-visi
 ```text
 [Research Nudge]
 
-You have accumulated significant research debt through local tool use without
-consulting external information.
+Pause and reflect before continuing:
 
-Before continuing, consider whether external research could resolve the current
-uncertainty faster: search official documentation, GitHub, mature libraries, or
-the exact repeated error.
+1. What problem am I trying to solve right now? Restate it precisely.
+2. What approach am I currently taking, and how many attempts has it taken without success?
+3. Am I fully confident this approach will work? If I am guessing at an API, an error message, a library's behavior, or platform details I have not verified, I am not fully confident.
+4. If I am not fully confident: external research is cheaper than more local trial-and-error. Search the official documentation, GitHub issues, existing libraries, or the exact error message before trying again.
 
-Do not search merely to satisfy this reminder. If external research would not
-help, continue normally.
+Do not search merely to satisfy this reminder. If the task is self-contained and external research would not help, continue normally. If you are deliberately making progress from local evidence and do not want another reminder for a while, use the research_nudge_snooze tool.
 
 Current signals: debt=21/20, tool_calls_since_research=5,
 failures=2, repeated_failures=1.
@@ -117,6 +116,14 @@ A reminder is eligible when any condition is met:
 
 After a reminder, the per-agent state continues accumulating but further reminders are suppressed for 10 minutes. Names are normalized before classification and research matching, so `WebSearch`, `web_search`, and `web-search` are treated consistently.
 
+### Agent snooze
+
+An agent that is deliberately making progress from local evidence can call the model-visible `research_nudge_snooze` tool to suppress reminders for a while (defaults to 30 minutes, capped by `maxAgentSnoozeMinutes`):
+
+- Snoozing is **per agent** — other agents keep their own schedules.
+- Research Debt keeps accumulating while snoozed: snoozing neither counts as research nor erases debt or failure counters. Once the snooze expires, an already-eligible state nudges on the next tool call.
+- A failed snooze call (for example, invalid arguments rejected by schema validation) arms nothing and is recorded as an ordinary failed call. Snooze executions bypass research recognition entirely, so a custom `researchTools` pattern such as `search` (which substring-matches the snooze tool's own name) can never turn a failed snooze into a debt reset.
+
 ## Configuration
 
 The bundle inserts a row with the id `research-nudge`. Override that row in the profile's `cordis.patch.yml`:
@@ -134,6 +141,7 @@ The bundle inserts a row with the id `research-nudge`. Override that row in the 
     executionDebt: 1
     failureDebt: 4
     repeatedFailureDebt: 6
+    maxAgentSnoozeMinutes: 60
     researchTools:
       - web_search
       - web_fetch
@@ -157,6 +165,7 @@ DSH patch layers replace a row's entire `config` value rather than deep-merging 
 | `executionDebt` | `1` | Weight for shell/build/test-style tools |
 | `failureDebt` | `4` | Extra weight for a failed result |
 | `repeatedFailureDebt` | `6` | Extra weight for an equivalent consecutive failure |
+| `maxAgentSnoozeMinutes` | `60` | Upper bound for one agent-requested snooze of reminders |
 | `researchTools` | common web/docs/GitHub names | Substring patterns that reset state after normalization |
 | `reminder` | built-in advisory text | Model-visible reminder body |
 | `debug` | `false` | Log resets and queued reminders to stderr |
@@ -165,7 +174,7 @@ DSH patch layers replace a row's entire `config` value rather than deep-merging 
 
 The plugin listens to the current `tools/post-execute` waterfall. It observes the typed `ToolExecution` and `ToolExecutionResult`, delegates to later listeners with `next()`, then prepends one official `createUserMessage(...)` notice through `PostToolDecision.additionalContexts`. Accept/block decisions and existing contexts are preserved.
 
-No service is read from `ctx`, so no Cordis service injection is required. State is held in a `WeakMap` keyed by the calling agent and disappears with the agent/runtime.
+The plugin declares `inject: ['tools']` and registers its `research_nudge_snooze` tool through `ctx.tools.register(...)`; no other service is read from `ctx`. State is held in a `WeakMap` keyed by the calling agent and disappears with the agent/runtime.
 
 ## Compatibility
 

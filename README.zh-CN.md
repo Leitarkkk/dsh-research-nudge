@@ -38,13 +38,20 @@ Agent 有时会陷入本地试错循环：
 ```text
 [Research Nudge]
 
-你在没有查阅外部信息的情况下，通过本地工具操作积累了较高的检索债务。
-请考虑：搜索官方文档、GitHub、成熟库或完整报错，是否能更快解决当前不确定性。
-不要为了满足提醒而搜索；如果外部检索没有帮助，请正常继续。
+Pause and reflect before continuing:
+
+1. What problem am I trying to solve right now? Restate it precisely.
+2. What approach am I currently taking, and how many attempts has it taken without success?
+3. Am I fully confident this approach will work? If I am guessing at an API, an error message, a library's behavior, or platform details I have not verified, I am not fully confident.
+4. If I am not fully confident: external research is cheaper than more local trial-and-error. Search the official documentation, GitHub issues, existing libraries, or the exact error message before trying again.
+
+Do not search merely to satisfy this reminder. If the task is self-contained and external research would not help, continue normally. If you are deliberately making progress from local evidence and do not want another reminder for a while, use the research_nudge_snooze tool.
 
 Current signals: debt=21/20, tool_calls_since_research=5,
 failures=2, repeated_failures=1.
 ```
+
+（注入模型的提醒为英文原文，大意：停下来反思——我在解决什么问题？当前方案试了多少次没成功？我对 API、报错、库行为或平台细节是否只是在猜？如果不确定，外部检索比继续本地试错更便宜；不要为满足提醒而搜索，自包含任务可正常继续；如果你确实在基于本地证据稳步推进、暂时不想再被提醒，可调用 `research_nudge_snooze` 工具。）
 
 失败指纹会忽略变化的数字和地址，因此 `TypeError at line 123` 与 `TypeError at line 456` 会被视为重复错误。检测到已配置的检索工具后，该 Agent 的累计状态会清零。
 
@@ -111,6 +118,14 @@ dsh plugin --profile web add .
 
 提醒后进入 10 分钟冷却期。工具名会先归一化，因此 `WebSearch`、`web_search` 和 `web-search` 能被一致识别。
 
+### Agent 主动静默（snooze）
+
+正在基于本地证据稳步推进的 Agent，可以调用模型可见的 `research_nudge_snooze` 工具，临时静默提醒一段时间（默认 30 分钟，上限由 `maxAgentSnoozeMinutes` 控制）：
+
+- 静默**按 Agent 生效**——其他 Agent 不受影响，各自维持自己的节奏。
+- 静默期间 Research Debt 照常累计：静默既不算检索，也不清零债务或失败计数。静默到期后，只要状态已满足阈值，下一次工具调用就会再次提醒。
+- 失败的 snooze 调用（例如参数被 schema 校验拒绝）不会武装任何静默，而是按一次普通失败调用记账。snooze 调用会完全绕开检索识别，因此即使自定义 `researchTools` 配了 `search` 这类能子串匹配到 snooze 工具名的短模式，也不可能把失败的 snooze 变成一次债务清零。
+
 ## 配置
 
 bundle 会插入 id 为 `research-nudge` 的配置行。在 profile 的 `cordis.patch.yml` 中按该 id 覆盖：
@@ -128,6 +143,7 @@ bundle 会插入 id 为 `research-nudge` 的配置行。在 profile 的 `cordis.
     executionDebt: 1
     failureDebt: 4
     repeatedFailureDebt: 6
+    maxAgentSnoozeMinutes: 60
     researchTools:
       - web_search
       - web_fetch
@@ -151,6 +167,7 @@ DSH patch 会替换目标行的整个 `config`，而不是深度合并。上例�
 | `executionDebt` | `1` | shell、构建、测试类工具权重 |
 | `failureDebt` | `4` | 失败结果附加权重 |
 | `repeatedFailureDebt` | `6` | 等价错误重复出现的附加权重 |
+| `maxAgentSnoozeMinutes` | `60` | Agent 单次主动静默的上限（分钟） |
 | `researchTools` | 常见 web/docs/GitHub 工具名 | 归一化后做子串匹配，命中则清零 |
 | `reminder` | 内置提醒文本 | 注入模型上下文的正文 |
 | `debug` | `false` | 向 stderr 记录清零和提醒事件 |
@@ -159,7 +176,7 @@ DSH patch 会替换目标行的整个 `config`，而不是深度合并。上例�
 
 插件监听当前的 `tools/post-execute` waterfall，读取官方类型 `ToolExecution` 与 `ToolExecutionResult`，通过 `next()` 委托后续 listener，再用官方 `createUserMessage(...)` 创建 notice，并通过 `PostToolDecision.additionalContexts` 前置加入。原有 accept/block 决策和其他上下文都会保留。
 
-插件不通过 `ctx` 读取任何 Service，因此不需要声明 Cordis service injection。状态保存在按 Agent 区分的 `WeakMap` 中，随 Agent/runtime 一起消失。
+插件声明 `inject: ['tools']`，通过 `ctx.tools.register(...)` 注册 `research_nudge_snooze` 工具；除此之外不通过 `ctx` 读取任何 Service。状态保存在按 Agent 区分的 `WeakMap` 中，随 Agent/runtime 一起消失。
 
 ## 兼容性
 
