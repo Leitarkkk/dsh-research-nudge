@@ -10,7 +10,15 @@ import { apply, name as pluginName } from '../lib/index.js'
 /** Minimal Cordis context capturing whatever the plugin registers. */
 function makeCtx() {
   const listeners = new Map()
-  return { ctx: { on(event, listener) { listeners.set(event, listener) } }, listeners }
+  const tools = new Map()
+  return {
+    ctx: {
+      on(event, listener) { listeners.set(event, listener) },
+      tools: { register(tool) { tools.set(tool.name, tool) } },
+    },
+    listeners,
+    tools,
+  }
 }
 
 function plugin(listeners) {
@@ -18,18 +26,18 @@ function plugin(listeners) {
 }
 
 /** Drive one finished tool execution through the waterfall. */
-async function runTool(listener, agent, name, result, { downstream = { kind: 'accept' } } = {}) {
-  const exec = execution(agent, name)
+async function runTool(listener, agent, name, result, { downstream = { kind: 'accept' }, arguments: args = {} } = {}) {
+  const exec = execution(agent, name, args)
   return listener(exec, result, async () => downstream)
 }
 
-function execution(agent, name) {
+function execution(agent, name, args = {}) {
   return {
     token: Symbol('tool'),
     callId: 'call-1',
     rootCallId: 'call-1',
     name,
-    arguments: {},
+    arguments: args,
     agent,
     signal: new AbortController().signal,
   }
@@ -47,10 +55,11 @@ function failed(text) {
   return { isError: true, error: { message: text }, content: [{ type: 'text', text: `Error: ${text}` }] }
 }
 
-test('adapter registers a tools/post-execute listener', () => {
-  const { ctx, listeners } = makeCtx()
+test('adapter registers a tools/post-execute listener and snooze tool', () => {
+  const { ctx, listeners, tools } = makeCtx()
   apply(ctx, {})
   assert.equal(listeners.has('tools/post-execute'), true)
+  assert.equal(tools.has('research_nudge_snooze'), true)
 })
 
 test('enabled:false registers no listener', () => {
@@ -83,7 +92,6 @@ test('failure debt triggers a nudge on the crossing call', async () => {
   apply(ctx, { debtThreshold: 10, maxToolCallsWithoutResearch: 999, maxMinutesWithoutResearch: 999 })
   const listener = plugin(listeners)
   const agent = {}
-  // 1 (ordinary) + 4 (failure) per distinct failing call: 5, then 10.
   const decision1 = await runTool(listener, agent, 'grep', failed('first error'))
   assert.equal(nudgeOf(decision1), undefined)
   const decision2 = await runTool(listener, agent, 'grep', failed('second error'))
@@ -96,8 +104,6 @@ test('repeated equivalent failures escalate through the adapter', async () => {
   apply(ctx, { debtThreshold: 20, maxToolCallsWithoutResearch: 999, maxMinutesWithoutResearch: 999 })
   const listener = plugin(listeners)
   const agent = {}
-  // Identical failures: 5 debt, then 16 (+6 repeat penalty), then 27 — the
-  // repeated penalty is what crosses 20 on the 3rd call.
   const decision1 = await runTool(listener, agent, 'grep', failed('TypeError at line 123'))
   const decision2 = await runTool(listener, agent, 'grep', failed('TypeError at line 456'))
   assert.equal(nudgeOf(decision1), undefined)
@@ -127,6 +133,22 @@ test('research tool resets the accumulation', async () => {
     const decision = await listener(execution(researchAgent, 'read'), succeeded(), async () => ({ kind: 'accept' }))
     assert.equal(nudgeOf(decision), undefined, 'research reset must clear accumulated debt')
   }
+})
+
+test('agent snooze suppresses nudges for that agent without resetting debt', async () => {
+  const { ctx, listeners } = makeCtx()
+  apply(ctx, { maxToolCallsWithoutResearch: 2, debtThreshold: 999, maxMinutesWithoutResearch: 999, maxAgentSnoozeMinutes: 60 })
+  const listener = plugin(listeners)
+  const agent = {}
+  await runTool(listener, agent, 'read', succeeded())
+  await runTool(listener, agent, 'research_nudge_snooze', succeeded(), { arguments: { minutes: 30, reason: 'reading dependency source' } })
+  const suppressed = await runTool(listener, agent, 'read', succeeded())
+  assert.equal(nudgeOf(suppressed), undefined, 'snoozed agent must not be nudged even though call threshold is crossed')
+
+  const otherAgent = {}
+  await runTool(listener, otherAgent, 'read', succeeded())
+  const other = await runTool(listener, otherAgent, 'read', succeeded())
+  assert.ok(nudgeOf(other), 'snooze must be isolated to the requesting agent')
 })
 
 test('cooldown suppresses further nudges until it elapses', async () => {
@@ -175,9 +197,6 @@ test('policy state is isolated per agent', async () => {
 
 test('unexpected shapes are tolerated without throwing or nudging', async () => {
   const { ctx, listeners } = makeCtx()
-  // Extremely lax thresholds: this test only asserts shape toleration — a
-  // result-less call is legitimately counted as a failure (never a throw),
-  // so it must not cross any nudge threshold here.
   apply(ctx, { maxToolCallsWithoutResearch: 999, debtThreshold: 999, maxMinutesWithoutResearch: 999 })
   const listener = plugin(listeners)
   const weird = [
@@ -202,6 +221,7 @@ test('unexpected shapes are tolerated without throwing or nudging', async () => 
 
 test('adapter composes through a real Cordis waterfall', async () => {
   const ctx = new Context()
+  ctx.tools = { register() {} }
   apply(ctx, { maxToolCallsWithoutResearch: 1, debtThreshold: 999, maxMinutesWithoutResearch: 999 })
   const decision = await ctx.waterfall(
     ctx,
